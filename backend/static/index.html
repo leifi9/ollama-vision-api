@@ -1,0 +1,1025 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ollama Vision API</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2d3a;
+      --text: #e4e4e7;
+      --dim: #71717a;
+      --accent: #22d3ee;
+      --accent-dim: rgba(34, 211, 238, 0.12);
+      --green: #4ade80;
+      --red: #f87171;
+      --orange: #fb923c;
+      --radius: 10px;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 24px;
+    }
+
+    .container { max-width: 760px; margin: 0 auto; }
+
+    header { text-align: center; margin-bottom: 32px; }
+    header h1 { font-size: 1.5rem; font-weight: 600; color: var(--accent); letter-spacing: 1px; }
+    header p   { color: var(--dim); font-size: 0.8rem; margin-top: 6px; }
+
+    /* ── Status Bar ── */
+    .status-bar {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 16px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); margin-bottom: 20px; font-size: 0.75rem;
+    }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); flex-shrink: 0; }
+    .status-dot.ok    { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .status-dot.warn  { background: var(--orange); }
+    .status-dot.error { background: var(--red); }
+
+    /* ── Tab Navigation ── */
+    .tab-nav {
+      display: flex; gap: 4px; margin-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    .tab-btn {
+      background: none; border: none; border-bottom: 2px solid transparent;
+      color: var(--dim); font-family: inherit; font-size: 0.75rem; font-weight: 600;
+      letter-spacing: 1px; padding: 8px 16px; cursor: pointer; margin-bottom: -1px;
+      transition: all 0.2s;
+    }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    /* ── Views ── */
+    .view { display: none; }
+    .view.active { display: block; }
+
+    /* ── Upload Zone (single) ── */
+    .upload-zone {
+      border: 2px dashed var(--border); border-radius: var(--radius);
+      padding: 40px 20px; text-align: center; cursor: pointer;
+      background: var(--surface); position: relative; transition: all 0.2s;
+    }
+    .upload-zone:hover, .upload-zone.dragover {
+      border-color: var(--accent); background: var(--accent-dim);
+    }
+    .upload-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+    .upload-zone .icon  { font-size: 2rem; margin-bottom: 8px; }
+    .upload-zone .label { color: var(--dim); font-size: 0.8rem; }
+
+    /* ── Preview ── */
+    .preview { margin-top: 16px; display: none; text-align: center; }
+    .preview img { max-width: 100%; max-height: 300px; border-radius: var(--radius); border: 1px solid var(--border); }
+    .preview .filename { color: var(--dim); font-size: 0.7rem; margin-top: 6px; }
+
+    /* ── Prompt / Form Row ── */
+    .prompt-section { margin-top: 16px; }
+    .prompt-section label, .form-row label {
+      font-size: 0.7rem; color: var(--dim); display: block;
+      margin-bottom: 4px; text-transform: uppercase; letter-spacing: 1px;
+    }
+    .prompt-section textarea, .form-row input, .form-row textarea {
+      width: 100%; padding: 10px 12px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); color: var(--text); font-family: inherit; font-size: 0.8rem;
+    }
+    .prompt-section textarea { resize: vertical; min-height: 60px; }
+    .form-row input          { height: 38px; }
+    .form-row textarea       { resize: vertical; min-height: 60px; }
+    .prompt-section textarea:focus, .form-row input:focus, .form-row textarea:focus {
+      outline: none; border-color: var(--accent);
+    }
+    .form-row { margin-bottom: 10px; }
+
+    /* ── Buttons ── */
+    .btn {
+      padding: 9px 16px; border: 1px solid var(--border); border-radius: var(--radius);
+      background: none; color: var(--dim); font-family: inherit; font-size: 0.75rem;
+      font-weight: 600; cursor: pointer; letter-spacing: 0.5px; transition: all 0.2s;
+    }
+    .btn:hover { color: var(--text); border-color: var(--dim); }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .btn-primary {
+      background: var(--accent); border-color: var(--accent); color: var(--bg);
+    }
+    .btn-primary:hover { filter: brightness(1.15); color: var(--bg); border-color: var(--accent); }
+
+    .btn-danger { color: var(--red); border-color: rgba(248,113,113,0.3); }
+    .btn-danger:hover { border-color: var(--red); }
+
+    .btn-full { width: 100%; margin-top: 16px; padding: 14px; }
+
+    /* ── Spinner ── */
+    .spinner { display: none; text-align: center; margin-top: 20px; color: var(--dim); font-size: 0.8rem; }
+    .spinner .dots::after { content: ''; animation: dots 1.5s steps(4) infinite; }
+    @keyframes dots {
+      0%  { content: ''; } 25% { content: '.'; }
+      50% { content: '..'; } 75% { content: '...'; }
+    }
+
+    /* ── Result Card ── */
+    .result { margin-top: 20px; display: none; }
+    .result-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 20px;
+    }
+    .result-card h3 { color: var(--accent); font-size: 1rem; margin-bottom: 12px; }
+    .result-field { margin-bottom: 10px; }
+    .result-field .key { font-size: 0.65rem; color: var(--dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 2px; }
+    .result-field .value { font-size: 0.85rem; line-height: 1.5; }
+    .tag {
+      display: inline-block; padding: 3px 10px;
+      background: var(--accent-dim); border: 1px solid rgba(34,211,238,0.25);
+      border-radius: 20px; font-size: 0.7rem; color: var(--accent); margin: 2px 4px 2px 0;
+    }
+    .meta {
+      margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border);
+      font-size: 0.65rem; color: var(--dim);
+    }
+
+    /* ── Error ── */
+    .error-box {
+      margin-top: 20px; display: none; padding: 14px 16px;
+      background: rgba(248,113,113,0.08); border: 1px solid rgba(248,113,113,0.3);
+      border-radius: var(--radius); color: var(--red); font-size: 0.8rem;
+    }
+
+    /* ── JSON toggle ── */
+    .json-toggle { margin-top: 10px; text-align: right; }
+    .json-toggle button {
+      background: none; border: 1px solid var(--border); color: var(--dim);
+      font-family: inherit; font-size: 0.65rem; padding: 4px 10px; border-radius: 6px; cursor: pointer;
+    }
+    .json-toggle button:hover { color: var(--text); border-color: var(--dim); }
+    .json-raw {
+      display: none; margin-top: 8px; padding: 12px;
+      background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+      font-size: 0.7rem; overflow-x: auto; white-space: pre-wrap; color: var(--dim);
+    }
+
+    /* ── Gallery: Search Bar ── */
+    .search-bar { display: flex; gap: 8px; margin-bottom: 16px; }
+    .search-bar input {
+      flex: 1; padding: 10px 14px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); color: var(--text); font-family: inherit; font-size: 0.8rem;
+    }
+    .search-bar input:focus { outline: none; border-color: var(--accent); }
+    .search-bar input::placeholder { color: var(--dim); }
+
+    /* ── Gallery: Batch Upload Zone ── */
+    .batch-zone {
+      border: 2px dashed var(--border); border-radius: var(--radius);
+      padding: 20px; text-align: center; cursor: pointer;
+      background: var(--surface); position: relative; margin-bottom: 16px; transition: all 0.2s;
+    }
+    .batch-zone:hover, .batch-zone.dragover {
+      border-color: var(--accent); background: var(--accent-dim);
+    }
+    .batch-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+    .batch-zone .label { color: var(--dim); font-size: 0.75rem; }
+    .batch-zone .hint  { color: var(--dim); font-size: 0.65rem; margin-top: 4px; }
+
+    /* ── Gallery: Batch Progress Log ── */
+    .batch-log {
+      display: none; background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 12px 16px; margin-bottom: 16px;
+      font-size: 0.75rem; max-height: 200px; overflow-y: auto;
+    }
+    .batch-log-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 8px; font-size: 0.7rem; color: var(--dim);
+    }
+    .batch-event {
+      padding: 3px 0; border-bottom: 1px solid var(--border);
+      display: flex; gap: 8px; align-items: flex-start;
+    }
+    .batch-event:last-child { border-bottom: none; }
+    .batch-event .ev-icon { flex-shrink: 0; }
+    .batch-event.ev-done  .ev-icon { color: var(--green); }
+    .batch-event.ev-error .ev-icon { color: var(--red); }
+    .batch-event.ev-info  .ev-icon { color: var(--dim); }
+    .batch-event .ev-text { color: var(--text); word-break: break-all; }
+    .batch-event .ev-sub  { color: var(--dim); font-size: 0.65rem; margin-top: 1px; }
+
+    /* ── Gallery: Header + Grid ── */
+    .gallery-header {
+      display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;
+    }
+    .gallery-header .count { font-size: 0.7rem; color: var(--dim); }
+
+    .gallery-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+      gap: 12px; margin-bottom: 20px;
+    }
+
+    .gallery-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); overflow: hidden;
+      cursor: pointer; transition: border-color 0.2s, transform 0.1s;
+    }
+    .gallery-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+    .gallery-card .thumb {
+      width: 100%; aspect-ratio: 1; object-fit: cover; background: var(--bg); display: block;
+    }
+    .gallery-card .thumb-placeholder {
+      width: 100%; aspect-ratio: 1; background: var(--bg);
+      display: none; align-items: center; justify-content: center;
+      font-size: 2rem; color: var(--dim);
+    }
+    .gallery-card .card-body { padding: 10px 12px; }
+    .gallery-card .card-name {
+      font-size: 0.8rem; font-weight: 600;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 4px;
+    }
+    .gallery-card .card-tags { display: flex; flex-wrap: wrap; gap: 2px; }
+    .gallery-card .card-date { font-size: 0.6rem; color: var(--dim); margin-top: 6px; }
+
+    .gallery-empty {
+      text-align: center; padding: 60px 20px; color: var(--dim); font-size: 0.8rem;
+      border: 1px dashed var(--border); border-radius: var(--radius);
+      grid-column: 1 / -1;
+    }
+    .gallery-empty .icon { font-size: 2rem; margin-bottom: 12px; }
+
+    /* ── Gallery: Pagination ── */
+    .pagination {
+      display: flex; justify-content: center; align-items: center;
+      gap: 12px; font-size: 0.75rem; color: var(--dim);
+    }
+
+    /* ── Detail View ── */
+    .detail-back { margin-bottom: 16px; }
+
+    .detail-image-row {
+      display: flex; gap: 16px; align-items: flex-start; margin-bottom: 20px;
+    }
+    .detail-thumb {
+      width: 140px; height: 140px; object-fit: cover;
+      border-radius: var(--radius); border: 1px solid var(--border);
+      flex-shrink: 0; background: var(--surface);
+    }
+    .detail-info { flex: 1; min-width: 0; }
+    .detail-info .d-label {
+      font-size: 0.65rem; color: var(--dim);
+      text-transform: uppercase; letter-spacing: 1px; margin-bottom: 2px;
+    }
+    .detail-info .d-value { font-size: 0.8rem; margin-bottom: 10px; word-break: break-all; }
+    .detail-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+
+    /* ── Detail: Re-analyze Form ── */
+    .reanalyze-form {
+      display: none; background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 16px; margin-bottom: 20px;
+    }
+    .reanalyze-form h4 { font-size: 0.8rem; color: var(--accent); margin-bottom: 12px; }
+    .reanalyze-form .form-actions { display: flex; gap: 8px; margin-top: 4px; }
+
+    /* ── Detail: Analysis Columns ── */
+    .analyses-scroll {
+      overflow-x: auto; margin-bottom: 20px; -webkit-overflow-scrolling: touch;
+    }
+    .analyses-columns { display: flex; gap: 12px; min-width: min-content; }
+
+    .analysis-col {
+      min-width: 240px; max-width: 300px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 14px; flex-shrink: 0;
+    }
+    .analysis-col .col-header {
+      font-size: 0.65rem; color: var(--dim);
+      margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border);
+    }
+    .analysis-col .col-header .col-num { color: var(--accent); font-weight: 600; }
+    .analysis-col .col-field { margin-bottom: 8px; }
+    .analysis-col .col-label {
+      font-size: 0.6rem; color: var(--dim);
+      text-transform: uppercase; letter-spacing: 1px; margin-bottom: 2px;
+    }
+    .analysis-col .col-value { font-size: 0.75rem; line-height: 1.5; }
+    .analysis-col .col-tags { display: flex; flex-wrap: wrap; gap: 2px; }
+    .col-tag {
+      display: inline-block; padding: 2px 8px;
+      background: var(--accent-dim); border: 1px solid rgba(34,211,238,0.2);
+      border-radius: 20px; font-size: 0.65rem; color: var(--accent); margin: 1px 2px 1px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>⬡ OLLAMA VISION</h1>
+      <p>Lokale Bilderkennung via LLaVA</p>
+    </header>
+
+    <div class="status-bar" id="statusBar">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusText">Prüfe Verbindung…</span>
+    </div>
+
+    <!-- ── Tab Navigation ── -->
+    <nav class="tab-nav">
+      <button class="tab-btn" data-view="analyze">ANALYZE</button>
+      <button class="tab-btn" data-view="gallery">GALLERY</button>
+    </nav>
+
+    <!-- ════════════════════════════════════════════════ -->
+    <!-- View: Analyze                                   -->
+    <!-- ════════════════════════════════════════════════ -->
+    <div id="view-analyze" class="view">
+      <div class="upload-zone" id="uploadZone">
+        <input type="file" id="fileInput" accept="image/*">
+        <div class="icon">📷</div>
+        <div class="label">Bild hierher ziehen oder klicken</div>
+      </div>
+
+      <div class="preview" id="preview">
+        <img id="previewImg" alt="Vorschau">
+        <div class="filename" id="previewName"></div>
+      </div>
+
+      <div class="prompt-section">
+        <label for="promptInput">Custom Prompt (optional)</label>
+        <textarea id="promptInput" placeholder="Leer lassen für Standard-3D-Print-Analyse…"></textarea>
+      </div>
+
+      <button class="btn btn-primary btn-full" id="analyzeBtn" disabled>ANALYSIEREN</button>
+
+      <div class="spinner" id="spinner">
+        Bild wird analysiert<span class="dots"></span>
+      </div>
+
+      <div class="error-box" id="errorBox"></div>
+
+      <div class="result" id="result">
+        <div class="result-card">
+          <h3 id="resultName"></h3>
+          <div class="result-field">
+            <div class="key">Beschreibung</div>
+            <div class="value" id="resultDesc"></div>
+          </div>
+          <div class="result-field">
+            <div class="key">Keywords</div>
+            <div class="value" id="resultKeywords"></div>
+          </div>
+          <div class="result-field">
+            <div class="key">STL-Suchbegriff</div>
+            <div class="value" id="resultQuery"></div>
+          </div>
+          <div class="meta" id="resultMeta"></div>
+          <div class="json-toggle">
+            <button onclick="toggleJson()">JSON anzeigen</button>
+          </div>
+          <pre class="json-raw" id="jsonRaw"></pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════ -->
+    <!-- View: Gallery                                   -->
+    <!-- ════════════════════════════════════════════════ -->
+    <div id="view-gallery" class="view">
+      <!-- Search -->
+      <div class="search-bar">
+        <input type="search" id="searchInput" placeholder="Suche in allen Analysen…">
+        <button class="btn" id="searchClearBtn" style="display:none">✕</button>
+      </div>
+
+      <!-- Batch Upload -->
+      <div class="batch-zone" id="batchZone">
+        <input type="file" id="batchInput" accept="image/*" multiple>
+        <div style="font-size:1.4rem;margin-bottom:6px">⬡</div>
+        <div class="label">Mehrere Bilder auswählen oder hierher ziehen</div>
+        <div class="hint">Batch-Analyse mit SSE-Fortschritt · max 20 Dateien</div>
+      </div>
+
+      <!-- Batch Progress Log -->
+      <div class="batch-log" id="batchLog">
+        <div class="batch-log-header">
+          <span id="batchLogTitle">Batch-Analyse…</span>
+          <button class="btn" style="font-size:0.65rem;padding:2px 8px" onclick="hideBatchLog()">✕</button>
+        </div>
+        <div id="batchEvents"></div>
+      </div>
+
+      <!-- Gallery Header -->
+      <div class="gallery-header">
+        <span class="count" id="galleryCount"></span>
+        <button class="btn" onclick="loadGallery()">↻ Reload</button>
+      </div>
+
+      <!-- Gallery Grid -->
+      <div class="gallery-grid" id="galleryGrid">
+        <div class="gallery-empty"><div class="icon">⬡</div>Lade…</div>
+      </div>
+
+      <!-- Pagination -->
+      <div class="pagination" id="pagination"></div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════ -->
+    <!-- View: Detail                                    -->
+    <!-- ════════════════════════════════════════════════ -->
+    <div id="view-detail" class="view">
+      <div class="detail-back">
+        <button class="btn" onclick="showView('gallery')">← Galerie</button>
+      </div>
+
+      <div class="detail-image-row">
+        <img id="detailThumb" class="detail-thumb" alt="">
+        <div class="detail-info">
+          <div class="d-label">Dateiname</div>
+          <div class="d-value" id="detailFilename"></div>
+          <div class="d-label">Größe</div>
+          <div class="d-value" id="detailSize"></div>
+          <div class="d-label">Hochgeladen</div>
+          <div class="d-value" id="detailDate"></div>
+          <div class="detail-actions">
+            <button class="btn btn-primary" id="detailReanalyzeToggle">Re-Analyze</button>
+            <button class="btn btn-danger" id="detailDeleteBtn">Löschen</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Re-analyze Form -->
+      <div class="reanalyze-form" id="reanalyzeForm">
+        <h4>RE-ANALYZE</h4>
+        <div class="form-row">
+          <label>Prompt (leer = letzten wiederverwenden)</label>
+          <textarea id="reanalyzePrompt" rows="3" placeholder="Leer = letzten Prompt wiederverwenden…"></textarea>
+        </div>
+        <div class="form-row">
+          <label>Modell (leer = letzten wiederverwenden)</label>
+          <input type="text" id="reanalyzeModel" placeholder="z.B. llava:7b — leer = letztes Modell">
+        </div>
+        <div class="reanalyze-form form-actions" style="background:none;border:none;padding:0;margin-bottom:0">
+          <button class="btn btn-primary" id="reanalyzeSubmitBtn">Starten</button>
+          <button class="btn" onclick="toggleReanalyzeForm()">Abbrechen</button>
+        </div>
+        <div class="spinner" id="reanalyzeSpinner" style="margin-top:10px">
+          Analyse läuft<span class="dots"></span>
+        </div>
+        <div class="error-box" id="reanalyzeError"></div>
+      </div>
+
+      <!-- Analysis Columns -->
+      <div style="font-size:0.7rem;color:var(--dim);margin-bottom:8px" id="analysesLabel"></div>
+      <div class="analyses-scroll">
+        <div class="analyses-columns" id="analysesColumns"></div>
+      </div>
+    </div>
+
+  </div><!-- /.container -->
+
+  <script>
+    // ═══════════════════════════════════════════════════
+    // State
+    // ═══════════════════════════════════════════════════
+    const state = {
+      currentView: 'analyze',
+      currentImageId: null,
+      gallery: { page: 1, perPage: 20, total: 0, query: '' },
+    };
+
+    // ═══════════════════════════════════════════════════
+    // Helpers
+    // ═══════════════════════════════════════════════════
+    function esc(s) {
+      return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function formatDate(iso) {
+      if (!iso) return '–';
+      const normalized = iso.replace(' ', 'T') + (iso.endsWith('Z') ? '' : 'Z');
+      const d = new Date(normalized);
+      if (isNaN(d)) return iso;
+      return d.toLocaleDateString('de-DE', {
+        day:'2-digit', month:'2-digit', year:'2-digit',
+        hour:'2-digit', minute:'2-digit',
+      });
+    }
+
+    function formatBytes(n) {
+      if (!n) return '–';
+      if (n < 1024)    return n + ' B';
+      if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+      return (n / 1048576).toFixed(1) + ' MB';
+    }
+
+    // ═══════════════════════════════════════════════════
+    // Router (hash-based)
+    // ═══════════════════════════════════════════════════
+    function showView(name, imageId = null) {
+      document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(b => {
+        // Gallery tab stays active when in detail view
+        const active = b.dataset.view === name || (name === 'detail' && b.dataset.view === 'gallery');
+        b.classList.toggle('active', active);
+      });
+      const el = document.getElementById('view-' + name);
+      if (el) el.classList.add('active');
+      state.currentView = name;
+
+      if (name === 'gallery') {
+        window.location.hash = 'gallery';
+        loadGallery();
+      } else if (name === 'detail' && imageId) {
+        state.currentImageId = imageId;
+        window.location.hash = 'detail/' + imageId;
+        loadDetail(imageId);
+      } else {
+        window.location.hash = 'analyze';
+      }
+    }
+
+    function handleHash() {
+      const hash = window.location.hash.slice(1);
+      if (hash === 'gallery') {
+        showView('gallery');
+      } else if (hash.startsWith('detail/')) {
+        const id = parseInt(hash.split('/')[1], 10);
+        if (!isNaN(id)) showView('detail', id);
+        else showView('analyze');
+      } else {
+        showView('analyze');
+      }
+    }
+
+    window.addEventListener('hashchange', handleHash);
+
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => showView(btn.dataset.view));
+    });
+
+    // ═══════════════════════════════════════════════════
+    // Health Check
+    // ═══════════════════════════════════════════════════
+    async function checkHealth() {
+      const dot  = document.getElementById('statusDot');
+      const text = document.getElementById('statusText');
+      try {
+        const r = await fetch('/api/health');
+        const d = await r.json();
+        if (d.status === 'ok') {
+          dot.className = 'status-dot ok';
+          text.textContent = 'Verbunden · ' + d.vision_model;
+        } else if (d.status === 'model_missing') {
+          dot.className = 'status-dot warn';
+          text.textContent = 'Modell fehlt: ' + d.vision_model;
+        } else {
+          dot.className = 'status-dot error';
+          text.textContent = d.detail || 'Ollama nicht erreichbar';
+        }
+      } catch {
+        dot.className = 'status-dot error';
+        text.textContent = 'Backend nicht erreichbar';
+      }
+    }
+    checkHealth();
+    setInterval(checkHealth, 15000);
+
+    // ═══════════════════════════════════════════════════
+    // View: Analyze (single image)
+    // ═══════════════════════════════════════════════════
+    const fileInput   = document.getElementById('fileInput');
+    const uploadZone  = document.getElementById('uploadZone');
+    const preview     = document.getElementById('preview');
+    const previewImg  = document.getElementById('previewImg');
+    const previewName = document.getElementById('previewName');
+    const analyzeBtn  = document.getElementById('analyzeBtn');
+    const spinner     = document.getElementById('spinner');
+    const errorBox    = document.getElementById('errorBox');
+    const result      = document.getElementById('result');
+    const promptInput = document.getElementById('promptInput');
+
+    let selectedFile = null;
+
+    uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('dragover'); });
+    uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+    uploadZone.addEventListener('drop', e => {
+      e.preventDefault();
+      uploadZone.classList.remove('dragover');
+      if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+    });
+    fileInput.addEventListener('change', () => { if (fileInput.files.length) handleFile(fileInput.files[0]); });
+
+    function handleFile(file) {
+      selectedFile = file;
+      previewName.textContent = file.name;
+      const reader = new FileReader();
+      reader.onload = e => { previewImg.src = e.target.result; preview.style.display = 'block'; };
+      reader.readAsDataURL(file);
+      analyzeBtn.disabled = false;
+      result.style.display = 'none';
+      errorBox.style.display = 'none';
+    }
+
+    analyzeBtn.addEventListener('click', async () => {
+      if (!selectedFile) return;
+      analyzeBtn.disabled = true;
+      spinner.style.display = 'block';
+      result.style.display = 'none';
+      errorBox.style.display = 'none';
+
+      const form = new FormData();
+      form.append('file', selectedFile);
+      const prompt = promptInput.value.trim();
+      if (prompt) form.append('prompt', prompt);
+
+      try {
+        const r = await fetch('/api/analyze', { method: 'POST', body: form });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || 'HTTP ' + r.status);
+
+        document.getElementById('resultName').textContent  = d.name         || 'Unbekannt';
+        document.getElementById('resultDesc').textContent  = d.description  || '–';
+        document.getElementById('resultQuery').textContent = d.search_query || '–';
+
+        const kwContainer = document.getElementById('resultKeywords');
+        kwContainer.innerHTML = '';
+        (d.keywords || []).forEach(kw => {
+          const tag = document.createElement('span');
+          tag.className = 'tag';
+          tag.textContent = kw;
+          kwContainer.appendChild(tag);
+        });
+
+        const meta = d._meta || {};
+        document.getElementById('resultMeta').textContent =
+          'Modell: ' + (meta.model || '?') + ' · Dauer: ' + (meta.total_duration_ms || '?') + ' ms';
+        document.getElementById('jsonRaw').textContent = JSON.stringify(d, null, 2);
+        result.style.display = 'block';
+      } catch (err) {
+        errorBox.textContent = err.message;
+        errorBox.style.display = 'block';
+      } finally {
+        spinner.style.display = 'none';
+        analyzeBtn.disabled = false;
+      }
+    });
+
+    function toggleJson() {
+      const el = document.getElementById('jsonRaw');
+      el.style.display = el.style.display === 'none' ? 'block' : 'none';
+    }
+
+    // ═══════════════════════════════════════════════════
+    // View: Gallery
+    // ═══════════════════════════════════════════════════
+    let searchTimer = null;
+    const searchInput    = document.getElementById('searchInput');
+    const searchClearBtn = document.getElementById('searchClearBtn');
+
+    searchInput.addEventListener('input', () => {
+      clearTimeout(searchTimer);
+      const q = searchInput.value.trim();
+      searchClearBtn.style.display = q ? 'inline-block' : 'none';
+      state.gallery.query = q;
+      state.gallery.page = 1;
+      searchTimer = setTimeout(() => q ? searchGallery(q) : loadGallery(), 300);
+    });
+
+    searchClearBtn.addEventListener('click', () => {
+      searchInput.value = '';
+      searchClearBtn.style.display = 'none';
+      state.gallery.query = '';
+      state.gallery.page = 1;
+      loadGallery();
+    });
+
+    async function loadGallery() {
+      const { page, perPage } = state.gallery;
+      const grid  = document.getElementById('galleryGrid');
+      const count = document.getElementById('galleryCount');
+      grid.innerHTML = '<div class="gallery-empty"><div class="icon">⬡</div>Lade…</div>';
+
+      try {
+        const r = await fetch('/api/gallery?page=' + page + '&per_page=' + perPage + '&sort=created_at&order=desc');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
+        state.gallery.total = d.total;
+        count.textContent = d.total + ' Bild' + (d.total !== 1 ? 'er' : '');
+        renderGrid(d.items);
+        renderPagination(d.total, d.page, d.per_page);
+      } catch (err) {
+        grid.innerHTML = '<div class="gallery-empty"><div class="icon">✕</div>' + esc(err.message) + '</div>';
+      }
+    }
+
+    async function searchGallery(q) {
+      const grid  = document.getElementById('galleryGrid');
+      const count = document.getElementById('galleryCount');
+      grid.innerHTML = '<div class="gallery-empty"><div class="icon">⬡</div>Suche…</div>';
+      document.getElementById('pagination').innerHTML = '';
+
+      try {
+        const r = await fetch('/api/gallery/search?q=' + encodeURIComponent(q) + '&limit=100');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
+        count.textContent = d.count + ' Treffer für „' + q + '"';
+        renderGrid(d.items);
+      } catch (err) {
+        grid.innerHTML = '<div class="gallery-empty"><div class="icon">✕</div>' + esc(err.message) + '</div>';
+      }
+    }
+
+    function renderGrid(items) {
+      const grid = document.getElementById('galleryGrid');
+      if (!items.length) {
+        grid.innerHTML = '<div class="gallery-empty"><div class="icon">📭</div>Keine Bilder vorhanden</div>';
+        return;
+      }
+      grid.innerHTML = '';
+      items.forEach(item => grid.appendChild(makeCard(item)));
+    }
+
+    function makeCard(item) {
+      const card = document.createElement('div');
+      card.className = 'gallery-card';
+      card.addEventListener('click', () => showView('detail', item.id));
+
+      const a        = item.latest_analysis;
+      const name     = a?.name || item.original_name;
+      const keywords = (a?.keywords || []).slice(0, 3);
+      const dateStr  = formatDate(item.created_at);
+      const tagsHtml = keywords.map(k =>
+        '<span class="tag" style="font-size:0.6rem;padding:1px 6px">' + esc(k) + '</span>'
+      ).join('');
+
+      card.innerHTML =
+        '<img class="thumb" src="/api/images/' + esc(item.filename) + '" alt="' + esc(name) + '"' +
+        ' onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">' +
+        '<div class="thumb-placeholder">📷</div>' +
+        '<div class="card-body">' +
+          '<div class="card-name">' + esc(name) + '</div>' +
+          '<div class="card-tags">' + tagsHtml + '</div>' +
+          '<div class="card-date">' + dateStr + '</div>' +
+        '</div>';
+      return card;
+    }
+
+    function renderPagination(total, page, perPage) {
+      const el = document.getElementById('pagination');
+      if (total <= perPage) { el.innerHTML = ''; return; }
+      const pages = Math.ceil(total / perPage);
+      el.innerHTML =
+        '<button class="btn" ' + (page <= 1 ? 'disabled' : '') + ' onclick="changePage(' + (page - 1) + ')">← Zurück</button>' +
+        '<span>' + page + ' / ' + pages + '</span>' +
+        '<button class="btn" ' + (page >= pages ? 'disabled' : '') + ' onclick="changePage(' + (page + 1) + ')">Weiter →</button>';
+    }
+
+    function changePage(p) {
+      state.gallery.page = p;
+      loadGallery();
+      window.scrollTo(0, 0);
+    }
+
+    // ── Batch Upload ──────────────────────────────────
+    const batchZone  = document.getElementById('batchZone');
+    const batchInput = document.getElementById('batchInput');
+
+    batchZone.addEventListener('dragover', e => { e.preventDefault(); batchZone.classList.add('dragover'); });
+    batchZone.addEventListener('dragleave', () => batchZone.classList.remove('dragover'));
+    batchZone.addEventListener('drop', e => {
+      e.preventDefault();
+      batchZone.classList.remove('dragover');
+      if (e.dataTransfer.files.length) startBatch(e.dataTransfer.files);
+    });
+    batchInput.addEventListener('change', () => {
+      if (batchInput.files.length) startBatch(batchInput.files);
+    });
+
+    async function startBatch(files) {
+      const MAX = 20;
+      if (files.length > MAX) {
+        alert('Max ' + MAX + ' Dateien pro Batch. ' + files.length + ' ausgewählt.');
+        return;
+      }
+
+      const log        = document.getElementById('batchLog');
+      const evContainer = document.getElementById('batchEvents');
+      const logTitle   = document.getElementById('batchLogTitle');
+
+      evContainer.innerHTML = '';
+      logTitle.textContent = 'Batch-Analyse: 0 / ' + files.length;
+      log.style.display = 'block';
+      addBatchEvent('info', '⬡', 'Batch gestartet: ' + files.length + ' Datei(en)');
+
+      const form = new FormData();
+      Array.from(files).forEach(f => form.append('files', f));
+
+      let res;
+      try {
+        res = await fetch('/api/gallery/batch', { method: 'POST', body: form });
+      } catch (err) {
+        addBatchEvent('error', '✕', 'Netzwerkfehler: ' + err.message);
+        return;
+      }
+
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        addBatchEvent('error', '✕', 'Fehler HTTP ' + res.status + ': ' + (d.detail || ''));
+        return;
+      }
+
+      let succeeded = 0;
+      const reader  = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const chunks = buf.split('\n\n');
+        buf = chunks.pop();
+        for (const chunk of chunks) {
+          const line = chunk.trim();
+          if (!line.startsWith('data: ')) continue;
+          let ev;
+          try { ev = JSON.parse(line.slice(6)); } catch { continue; }
+
+          if (ev.type === 'batch_start') {
+            logTitle.textContent = 'Batch-Analyse: 0 / ' + ev.total;
+          } else if (ev.type === 'image_done') {
+            succeeded++;
+            logTitle.textContent = 'Batch-Analyse: ' + succeeded + ' / ' + files.length;
+            addBatchEvent('done', '✓', (ev.result?.name || ev.filename), ev.filename);
+          } else if (ev.type === 'image_error') {
+            addBatchEvent('error', '✕', ev.filename + ': ' + (ev.error?.message || 'Fehler'));
+          } else if (ev.type === 'batch_aborted') {
+            addBatchEvent('error', '⚠', 'Batch abgebrochen: ' + (ev.reason?.message || 'Unbekannt'));
+          } else if (ev.type === 'batch_complete') {
+            logTitle.textContent = 'Fertig: ' + ev.succeeded + ' ok · ' + ev.failed + ' fehlgeschlagen';
+            addBatchEvent('info', '⬡', 'Batch abgeschlossen.');
+            loadGallery();
+          }
+        }
+      }
+      batchInput.value = '';
+    }
+
+    function addBatchEvent(type, icon, text, sub) {
+      const container = document.getElementById('batchEvents');
+      const el = document.createElement('div');
+      el.className = 'batch-event ev-' + type;
+      el.innerHTML =
+        '<span class="ev-icon">' + icon + '</span>' +
+        '<div><div class="ev-text">' + esc(text) + '</div>' +
+        (sub ? '<div class="ev-sub">' + esc(sub) + '</div>' : '') +
+        '</div>';
+      container.appendChild(el);
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function hideBatchLog() {
+      document.getElementById('batchLog').style.display = 'none';
+    }
+
+    // ═══════════════════════════════════════════════════
+    // View: Detail
+    // ═══════════════════════════════════════════════════
+    async function loadDetail(id) {
+      document.getElementById('detailThumb').src = '';
+      document.getElementById('detailFilename').textContent = '…';
+      document.getElementById('detailSize').textContent = '…';
+      document.getElementById('detailDate').textContent = '…';
+      document.getElementById('analysesColumns').innerHTML = '';
+      document.getElementById('analysesLabel').textContent = '';
+      document.getElementById('reanalyzeForm').style.display = 'none';
+      document.getElementById('reanalyzeError').style.display = 'none';
+      document.getElementById('reanalyzeSpinner').style.display = 'none';
+
+      try {
+        const r = await fetch('/api/gallery/' + id);
+        if (!r.ok) { alert('Bild nicht gefunden'); showView('gallery'); return; }
+        const d = await r.json();
+        renderDetail(d);
+      } catch (err) {
+        alert('Fehler: ' + err.message);
+        showView('gallery');
+      }
+    }
+
+    function renderDetail(d) {
+      state.currentImageId = d.id;
+      document.getElementById('detailThumb').src = '/api/images/' + d.filename;
+      document.getElementById('detailFilename').textContent = d.original_name;
+      document.getElementById('detailSize').textContent = formatBytes(d.file_size);
+      document.getElementById('detailDate').textContent = formatDate(d.created_at);
+
+      const analyses = d.analyses || [];
+      const label    = document.getElementById('analysesLabel');
+      label.textContent = analyses.length + ' Analyse' + (analyses.length !== 1 ? 'n' : '') +
+        (analyses.length > 1 ? ' — horizontal scrollen zum Vergleichen' : '');
+
+      const cols = document.getElementById('analysesColumns');
+      cols.innerHTML = '';
+      // API returns newest-first; display newest on the left
+      analyses.forEach((a, i) => cols.appendChild(makeAnalysisCol(a, i + 1, analyses.length)));
+
+      document.getElementById('detailDeleteBtn').onclick = async () => {
+        if (!confirm('Bild #' + d.id + ' und alle Analysen löschen?')) return;
+        const r = await fetch('/api/gallery/' + d.id, { method: 'DELETE' });
+        if (r.ok) showView('gallery');
+        else alert('Löschen fehlgeschlagen');
+      };
+
+      document.getElementById('detailReanalyzeToggle').onclick = toggleReanalyzeForm;
+      document.getElementById('reanalyzeSubmitBtn').onclick = submitReanalyze;
+    }
+
+    function makeAnalysisCol(a, num, total) {
+      const col = document.createElement('div');
+      col.className = 'analysis-col';
+
+      const tagsHtml = (a.keywords || []).map(k =>
+        '<span class="col-tag">' + esc(k) + '</span>'
+      ).join('') || '–';
+
+      const promptPreview = a.prompt_used
+        ? (a.prompt_used.length > 80 ? a.prompt_used.slice(0, 80) + '…' : a.prompt_used)
+        : '— Standard —';
+
+      col.innerHTML =
+        '<div class="col-header">' +
+          '<span class="col-num">#' + num + '</span> / ' + total +
+          ' &nbsp;·&nbsp; ' + formatDate(a.created_at) +
+          '<br>' + esc(a.model_used || '?') + ' &nbsp;·&nbsp; ' + (a.duration_ms ? a.duration_ms + ' ms' : '–') +
+        '</div>' +
+        '<div class="col-field"><div class="col-label">Name</div><div class="col-value">' + esc(a.name || '–') + '</div></div>' +
+        '<div class="col-field"><div class="col-label">Keywords</div><div class="col-tags">' + tagsHtml + '</div></div>' +
+        '<div class="col-field"><div class="col-label">Beschreibung</div><div class="col-value">' + esc(a.description || '–') + '</div></div>' +
+        '<div class="col-field"><div class="col-label">STL-Suchbegriff</div><div class="col-value">' + esc(a.search_query || '–') + '</div></div>' +
+        '<div class="col-field"><div class="col-label">Prompt</div>' +
+          '<div class="col-value" style="font-size:0.65rem;color:var(--dim)">' + esc(promptPreview) + '</div></div>';
+      return col;
+    }
+
+    function toggleReanalyzeForm() {
+      const form = document.getElementById('reanalyzeForm');
+      form.style.display = form.style.display === 'none' ? 'block' : 'none';
+      document.getElementById('reanalyzeError').style.display = 'none';
+    }
+
+    async function submitReanalyze() {
+      const id     = state.currentImageId;
+      const prompt = document.getElementById('reanalyzePrompt').value.trim() || null;
+      const model  = document.getElementById('reanalyzeModel').value.trim()  || null;
+
+      const submitBtn = document.getElementById('reanalyzeSubmitBtn');
+      const errBox    = document.getElementById('reanalyzeError');
+      const spin      = document.getElementById('reanalyzeSpinner');
+
+      submitBtn.disabled = true;
+      spin.style.display = 'block';
+      errBox.style.display = 'none';
+
+      try {
+        const r = await fetch('/api/gallery/' + id + '/reanalyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt, model }),
+        });
+        const d = await r.json();
+
+        if (!r.ok) {
+          const msg = d.error?.message || d.detail || 'HTTP ' + r.status;
+          errBox.textContent = msg;
+          errBox.style.display = 'block';
+          return;
+        }
+
+        // Reload detail to show new analysis column
+        document.getElementById('reanalyzeForm').style.display = 'none';
+        document.getElementById('reanalyzePrompt').value = '';
+        document.getElementById('reanalyzeModel').value = '';
+        await loadDetail(id);
+      } catch (err) {
+        errBox.textContent = err.message;
+        errBox.style.display = 'block';
+      } finally {
+        submitBtn.disabled = false;
+        spin.style.display = 'none';
+      }
+    }
+
+    // ═══════════════════════════════════════════════════
+    // Init
+    // ═══════════════════════════════════════════════════
+    handleHash();
+  </script>
+</body>
+</html>
