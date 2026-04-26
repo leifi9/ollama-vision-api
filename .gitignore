@@ -8,3 +8,4 @@ uploads/
 dist/
 node_modules/
 .DS_Store
+github_push.py
