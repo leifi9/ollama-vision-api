@@ -93,9 +93,10 @@ async def analyze(
 @router.get("/health")
 async def health():
     """Health-Check: Prüft Ollama-Verbindung und Modell-Verfügbarkeit."""
+    from fastapi.responses import JSONResponse
     status = check_ollama_health()
     code = 200 if status["status"] == "ok" else 503
-    return status
+    return JSONResponse(content=status, status_code=code)
 
 
 @router.get("/models")
